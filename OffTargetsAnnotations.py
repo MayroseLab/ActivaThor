@@ -48,13 +48,10 @@ def add_genomic_regions_to_off_targets(intersect_bed, sequence_to_candidate_dict
         # get the off target by the index created in the bed object
         off_target = sgRNA_candidate.off_targets_list[int(interval.score)]
         # check if off-target is a candidate
-        genomic_region = interval.fields[7]
-        if genomic_region == 'promoter' and sgRNA_candidate.seq == interval.name and sgRNA_candidate.gene in interval.fields[13]:
-            sgRNA_candidate.off_targets_list.remove(off_target)
-            continue
-        # dont write 'chromosome' as genomic region
-        if genomic_region.lower() == 'chr' or genomic_region.lower() == 'chromosome':
-            continue
+        genomic_region = (interval.fields[7], interval.fields[13])
+        # # dont write 'chromosome' as genomic region
+        # if genomic_region.lower() == 'chr' or genomic_region.lower() == 'chromosome':
+        #     continue
         # add the genomic region to offtarget.genomic_region set
-        off_target.genomic_regions.add(genomic_region)
+        off_target.genomic_region = genomic_region
     return

@@ -165,5 +165,17 @@ def get_off_targets(candidates_list: List[ActivationCandidate], in_path: str, ou
     intersect_bed = run_bedtools(candidates_list, out_path+gff_with_proms_path)
     # add the genomic regions to the OffTargets attributes
     add_genomic_regions_to_off_targets(intersect_bed, sequence_to_candidate_dict)
+    # remove on-targets
+    for candidate in candidates_list:
+        new_off_targets_lst = []
+        for off in candidate.off_targets_list:
+            if len(off.genomic_region) == 0:
+                off.genomic_region = ('chromosome', off.chromosome)
+                new_off_targets_lst.append(off)
+            elif off.genomic_region[0] == 'promoter' and off.genomic_region[1] == candidate.gene:
+                continue
+            else:
+                new_off_targets_lst.append(off)
+        candidate.off_targets_list = new_off_targets_lst
     # calculate the off-target scores for each off_target of each candidate
     calculate_scores(candidates_list)

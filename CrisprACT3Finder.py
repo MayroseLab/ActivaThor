@@ -84,26 +84,29 @@ def filter_gff_file(gff_file: str, genes_ids: List[str], upstream: int, downstre
     annotations = gffpd.read_gff3(gff_file)
     # filter relevant genes. Inform the user if an input gene ID was not found in the GFF file
     filtered_annotations = annotations.filter_feature_of_type(['gene'])
-    genes_filt_df = filtered_annotations.get_feature_by_attribute('gene_id', genes_ids).df
+    # genes_filt_df = filtered_annotations.get_feature_by_attribute('gene_id', genes_ids).df
+    genes_filt_gff = filtered_annotations.get_feature_by_attribute('gene_id', genes_ids)
     filt_annotations_attr = filtered_annotations.attributes_to_columns()
     for gene_id in genes_ids:
-        if gene_id not in list(filt_annotations_attr['gene_id']):  # TODO fix the finding method
+        if gene_id not in list(filt_annotations_attr['gene_id']):
             print(f"No matching gene ID={gene_id} was found in the GFF file")
     # add promoter site start and site end indices to the data frame
+    genes_filt_df = genes_filt_gff.attributes_to_columns()
     add_promoter_region_indices(genes_filt_df, upstream, downstream)
     genes_filt_df['start'] = genes_filt_df.apply(lambda x: x['site_start'], axis=1)
     genes_filt_df['end'] = genes_filt_df.apply(lambda x: x['site_end'], axis=1)
-    genes_filt_df = genes_filt_df.drop(['site_start', 'site_end'], axis=1)
     # change the type of the added sites to "promoter"
     genes_filt_df.loc[genes_filt_df["type"] == "gene", "type"] = "promoter"
     # append the promoter annotations to the GFF
-    new_anno_df = annotations.df.append(genes_filt_df, ignore_index=True)
+    new_anno_df = filt_annotations_attr.append(genes_filt_df, ignore_index=True)
+    new_anno_df['attributes'] = new_anno_df.apply(lambda x: x['gene_id'], axis=1)
+    new_anno_df = new_anno_df.drop(new_anno_df.iloc[:, 9:], axis=1)
     annotations.df = new_anno_df
     gff_with_proms_path = "/gff_with_proms.gff3"
     annotations.to_gff3(out_path + gff_with_proms_path)
-    annotations.df = genes_filt_df
-    promoters_df = annotations.attributes_to_columns()
-    return promoters_df, gff_with_proms_path
+    # annotations.df = genes_filt_df
+    # promoters_df = annotations.attributes_to_columns()
+    return genes_filt_df, gff_with_proms_path
 
 
 def get_upstream_sites(out_path: str, fasta_file: str, filtered_gene_df) -> List[str]:

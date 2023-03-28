@@ -57,8 +57,8 @@ class ActivationCandidate:
         """Create a dictionary of the ActivationCandidate object"""
         self_dict = self.__dict__
         if len(self.off_targets_list) >= 2:
-            self_dict["off1"] = f"{self.off_targets_list[0].score}:{self.off_targets_list[0].number_of_mismatches}:{self.off_targets_list[0].seq}:{self.off_targets_list[0].start_position}"
-            self_dict["off2"] = f"{self.off_targets_list[1].score}:{self.off_targets_list[1].number_of_mismatches}:{self.off_targets_list[1].seq}:{self.off_targets_list[1].start_position}"
+            self_dict["off1"] = f"{self.off_targets_list[0].score}:{self.off_targets_list[0].number_of_mismatches}:{self.off_targets_list[0].seq}:{self.off_targets_list[0].start_position}:{self.off_targets_list[0].genomic_region}"
+            self_dict["off2"] = f"{self.off_targets_list[1].score}:{self.off_targets_list[1].number_of_mismatches}:{self.off_targets_list[1].seq}:{self.off_targets_list[1].start_position}:{self.off_targets_list[1].genomic_region}"
         self_dict["nucleotide_repetitions"] = list(self.nucleotide_repetitions.items())
         return self_dict
 
@@ -80,12 +80,11 @@ class OffTarget:
         self.start_position = start_position
         self.strand = strand
         self.number_of_mismatches = number_of_mismatches
-        self.genomic_regions = set()
+        self.genomic_region = ""
         self.score = -1
-        self.pass_filter = True
 
     def __eq__(self, other):
         return self.__dict__ == other.__dict__
 
     def __repr__(self):
-        return f"[{self.seq}, {str(self.chromosome)}, {self.start_position}, {self.strand}, {self.number_of_mismatches}, {round(float(self.score), 4)}, {self.genomic_regions}]"
+        return f"[{self.seq}, {str(self.chromosome)}, {self.start_position}, {self.strand}, {self.number_of_mismatches}, {round(float(self.score), 4)}, {self.genomic_region}]"
