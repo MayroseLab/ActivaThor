@@ -1,7 +1,6 @@
 """Find sgRNAs for CRISPR-Act3"""
 import argparse
 import subprocess
-import time
 import warnings
 from itertools import groupby
 
@@ -44,7 +43,7 @@ def gene_ids_to_list(file_path: str) -> List[str]:
     # opening the file in read mode
     genes_file = open(f"{file_path}", "r")
     # reading the file
-    data = genes_file.read().upper()
+    data = genes_file.read()
     # replacing end splitting the text when newline ('\n') is seen.
     gene_ids_into_list = data.split("\n")
     genes_file.close()
@@ -60,12 +59,45 @@ def add_promoter_region_indices(genes_filt_df, upstream: int, downstream: int):
     """
     # create promoter site start indices
     genes_filt_df['site_start'] = genes_filt_df.apply(
-        lambda x: x['start'] - upstream - 1 if x['strand'] == '+' else x['end'] + downstream,
+        lambda x: x['start'] - upstream - 1 if x['strand'] == '+' else x['end'] - downstream,
         axis=1)
     # create promoter site end indices
     genes_filt_df['site_end'] = genes_filt_df.apply(
         lambda x: x['start'] + downstream - 1 if x['strand'] == '+' else x['end'] + upstream,
         axis=1)
+
+
+def full_genome_gff_filter(gff_file, bp_upstream, bp_downstream, out_path):
+    """
+    Parse the input GFF file with gffpandas, filter only the annotations for genes and add columns of promoter site
+    start and site end.
+
+    :param gff_file: path to input GFF format file of the genes annotations
+    :param bp_upstream: number of base-pairs upstream to the TSS to search potential sgRNA target sites
+    :param bp_downstream: number of base-pairs downstream to the TSS to search potential sgRNA target sites
+    :param out_path:
+    :return: gffpandas data frame
+    """
+    # open annotations file with gff pandas
+    annotations = gffpd.read_gff3(gff_file)
+    # filter genes
+    filtered_annotations = annotations.filter_feature_of_type(['gene'])
+    filt_annotations_attr = filtered_annotations.attributes_to_columns()
+    # add promoter site start and site end indices to the data frame
+    genes_filt_df = filtered_annotations.attributes_to_columns()
+    add_promoter_region_indices(genes_filt_df, bp_upstream, bp_downstream)
+    genes_filt_df['start'] = genes_filt_df.apply(lambda x: x['site_start'], axis=1)
+    genes_filt_df['end'] = genes_filt_df.apply(lambda x: x['site_end'], axis=1)
+    # change the type of the added sites to "promoter"
+    genes_filt_df.loc[genes_filt_df["type"] == "gene", "type"] = "promoter"
+    # append the promoter annotations to the GFF
+    new_anno_df = filt_annotations_attr.append(genes_filt_df, ignore_index=True)
+    new_anno_df['attributes'] = new_anno_df.apply(lambda x: x['gene_id'], axis=1)
+    new_anno_df = new_anno_df.drop(new_anno_df.iloc[:, 9:], axis=1)
+    annotations.df = new_anno_df
+    gff_with_proms_path = "/gff_with_proms.gff3"
+    annotations.to_gff3(out_path + gff_with_proms_path)
+    return genes_filt_df, gff_with_proms_path
 
 
 def filter_gff_file(gff_file: str, genes_ids: List[str], upstream: int, downstream: int, out_path: str):
@@ -84,7 +116,6 @@ def filter_gff_file(gff_file: str, genes_ids: List[str], upstream: int, downstre
     annotations = gffpd.read_gff3(gff_file)
     # filter relevant genes. Inform the user if an input gene ID was not found in the GFF file
     filtered_annotations = annotations.filter_feature_of_type(['gene'])
-    # genes_filt_df = filtered_annotations.get_feature_by_attribute('gene_id', genes_ids).df
     genes_filt_gff = filtered_annotations.get_feature_by_attribute('gene_id', genes_ids)
     filt_annotations_attr = filtered_annotations.attributes_to_columns()
     for gene_id in genes_ids:
@@ -104,8 +135,6 @@ def filter_gff_file(gff_file: str, genes_ids: List[str], upstream: int, downstre
     annotations.df = new_anno_df
     gff_with_proms_path = "/gff_with_proms.gff3"
     annotations.to_gff3(out_path + gff_with_proms_path)
-    # annotations.df = genes_filt_df
-    # promoters_df = annotations.attributes_to_columns()
     return genes_filt_df, gff_with_proms_path
 
 
@@ -121,7 +150,7 @@ def get_upstream_sites(out_path: str, fasta_file: str, filtered_gene_df) -> List
     filtered_gene_df.to_csv(out_path + '/genes.bed', sep='\t',
                             columns=['seq_id', 'start', 'end', 'gene_id', 'score', 'strand'],
                             header=False, index=False)
-    bed_file = out_path + "/genes.bed"  # TODO validate PATHs
+    bed_file = out_path + "/genes.bed"
     # run bedtools
     seq = subprocess.run(['bedtools', 'getfasta', '-fi', fasta_file, '-bed', bed_file, '-nameOnly', '-s'],
                          stdout=subprocess.PIPE)
@@ -129,7 +158,7 @@ def get_upstream_sites(out_path: str, fasta_file: str, filtered_gene_df) -> List
     return sites_list
 
 
-def get_targets_from_site(upstream_site: str, pams: Tuple) -> Tuple[List[str], List[str], List[str], List[str]]:
+def get_targets_from_site(upstream_site: str, pams: Tuple) -> Tuple[List[Tuple[str, int]], List[Tuple[str, int]], List[Tuple[str, int]], List[Tuple[str, int]]]:
     """
     Find potential CRISPR target sites in a given DNA sequence, and return a list of the target sequences.
 
@@ -154,7 +183,7 @@ def scores_batch(sgrnas: List[str], scoring_function, out_path: str) -> List[flo
     return scores
 
 
-def create_candidates(promoter_range_rank: int, targets_lst: List[str], gene_id: str,
+def create_candidates(promoter_range_rank: int, targets_lst: List[Tuple[str, int]], gene_id: str,
                       chromosome: str, act_site_start: int, act_site_end: int, gene_strand: str, targets_strand: str,
                       min_gc_cont: int, max_gc_cont: int) -> List[ActivationCandidate]:
     """
@@ -178,8 +207,8 @@ def create_candidates(promoter_range_rank: int, targets_lst: List[str], gene_id:
         target_strand = "+"
         if (gene_strand == "-" and targets_strand == "+") or (gene_strand == "+" and targets_strand == "-"):
             target_strand = "-"
-        candidate = ActivationCandidate(targets_lst[i][:20], targets_lst[i][20:], gene_id, chromosome, act_site_start,
-                                        act_site_end, target_strand, promoter_range_rank, 0, 0, {}, 0)
+        candidate = ActivationCandidate(targets_lst[i][0][:20], targets_lst[i][0][20:], gene_id, chromosome, act_site_start,
+                                        act_site_end, targets_lst[i][1], target_strand, promoter_range_rank, 0, 0, {}, 0)
         candidate.calc_GC_content(min_gc_cont, max_gc_cont)
         candidate.calc_seq_repetitions()
 
@@ -232,17 +261,34 @@ def return_candidates(out_path: str, sites_lst: List[str], genes_filt_df, scorin
     # sort candidates list for each gene ID by GC content, nucleotide repetitions and on-target score
     gene_id_attr_sort = sorted(candidates_list, key=attrgetter('gene'))
     # Group the objects by 'gene_id'
-    grouped_candidates = {gene_id: list(objects) for gene_id, objects in groupby(gene_id_attr_sort, key=attrgetter('gene'))}
-    # Create a dictionary with gene_id as key and value as a list of top 3 ranked objects
+    grouped_candidates = {gene_id: list(objects) for gene_id, objects in
+                          groupby(gene_id_attr_sort, key=attrgetter('gene'))}
+    # Create a dictionary with gene_id as key and value as a list of 'top_num'*2 ranked objects
     candidates_list_sorted = []
     for gene_id, objects in grouped_candidates.items():
-        # candidates_list_sorted += sorted(objects, key=lambda c: (c.gene, c.promoter_range_rank,
-        #                             c.gc_content_category, c.nuc_rep_score, -c.on_score))[:top_num]
-        candidates_list_sorted += sorted(objects, key=lambda c: (c.gene, c.promoter_range_rank, -c.on_score))[:top_num]
+        candidates_list_sorted += sorted(filter(lambda cand: cand.nuc_rep_score == 0, objects), key=lambda c: (c.gene, c.gc_content_category))[:top_num*2]
     return candidates_list_sorted
 
 
-def results_to_dataframe(candidates_list: List[ActivationCandidate], out_path: str, with_off_targets: int = 1) -> pd.DataFrame:
+def sort_candidates(candidates_list: List[ActivationCandidate], top_num: int = 3) -> List[ActivationCandidate]:
+    """
+
+    :param candidates_list: list of ActivationCandidates
+    :param top_num: number of top scored candidates per gene
+    """
+    # sort candidates list for each gene ID by GC content, nucleotide repetitions and on-target score
+    gene_id_attr_sort = sorted(candidates_list, key=attrgetter('gene'))
+    # Group the objects by 'gene_id'
+    grouped_candidates = {gene_id: list(objects) for gene_id, objects in groupby(gene_id_attr_sort, key=attrgetter('gene'))}
+    # Create a dictionary with gene_id as key and value as a list of 'top_num' ranked objects
+    candidates_list_sorted = []
+    for gene_id, objects in grouped_candidates.items():
+        candidates_list_sorted += sorted(filter(lambda cand: cand.off_targets_list[0].score < 0.15 if len(cand.off_targets_list) > 0 else True, objects), key=lambda c: (c.gene, c.promoter_range_rank,
+                                    c.gc_content_category, -c.on_score))[:top_num]
+    return candidates_list_sorted
+
+
+def results_to_dataframe(candidates_list: List[ActivationCandidate], out_path: str, with_off_targets: int = 1):
     """
 
     :param candidates_list:
@@ -253,19 +299,20 @@ def results_to_dataframe(candidates_list: List[ActivationCandidate], out_path: s
     df = pd.DataFrame([candidate.to_dict() for candidate in candidates_list]).reset_index()
     df['Rank'] = df.groupby('gene')['index'].transform('rank')
     if with_off_targets == 1:
-        header = ['Rank', 'seq', "pam", "gene", "chromosome", "act_site_start", "act_site_end", "strand",
-              "promoter_range_rank", "gc_content", "gc_content_category", 'nucleotide_repetitions', 'nuc_rep_score', "on_score", "off1", "off2"]
+        header = ['Rank', 'seq', "pam", "gene", "chromosome", "act_site_start", "act_site_end", "dist_from_TSS", "strand",
+              "promoter_range_rank", "gc_content", "gc_content_category", "on_score",
+                  "off1 score", "off1 mms", "off1 seq", "off1 position", "off1 chr or gene", "off1 chr num or gene ID",
+                  "off2 score", "off2 mms", "off2 seq", "off2 position", "off2 chr or gene", "off2 chr num or gene ID"]
     else:
-        header = ['Rank', 'seq', "pam", "gene", "chromosome", "act_site_start", "act_site_end", "strand",
-                  "promoter_range_rank", "gc_content", "gc_content_category", 'nucleotide_repetitions', 'nuc_rep_score', "on_score"]
+        header = ['Rank', 'seq', "pam", "gene", "chromosome", "act_site_start", "act_site_end", "dist_from_TSS", "strand",
+                  "promoter_range_rank", "gc_content", "gc_content_category", "on_score"]
     df.to_csv(out_path + "/results.csv", sep=',', columns=header, index=False)
-    return df
 
 
 def sgrnas_for_genes(out_path: str, in_path: str, genes_ids_file: str, fasta_file: str, gff_file: str,
                      scoring_function: str = 'ucrispr',
                      pams: Tuple = ('AGG', 'GGG', 'CGG', 'TGG'), bp_upstream: int = 300, bp_downstream: int = 0, min_gc_cont: int = 45,
-                     max_gc_cont: int = 60, with_off_targets: int = 1, top_num: int = 3) -> List[ActivationCandidate]:
+                     max_gc_cont: int = 60, with_off_targets: int = 1, top_num: int = 3, specific_genes=1) -> List[ActivationCandidate]:
     """
     Given a list of genes ensembl IDs, a FASTA file of full or partial genome sequence, a GFF file of annotations
     of the genome and a chosen scoring function - search and return sgRNA to target the wanted genes, with their sequence
@@ -284,14 +331,19 @@ def sgrnas_for_genes(out_path: str, in_path: str, genes_ids_file: str, fasta_fil
     :param max_gc_cont: percentage of maximum GC content by which to filter sgRNA candidates
     :param with_off_targets: choose whether to search for off-targets in the algorithm run
     :param top_num: number of top scored candidates per gene
+    :param specific_genes:
     :return: list of potential sgRNA as ActivationCandidate objects to target the input genes
     """
+    t0 = time.perf_counter()
     # choosing the scoring function
     scoring_function = choose_scoring_function(scoring_function)
-    # parse gene IDs text file and save into a list of gene IDs
-    genes_ids = gene_ids_to_list(genes_ids_file)
-    # handling the GFF annotations file - filter only the annotations for genes and add columns of promoter site start and site end.
-    promoters_df, gff_with_proms_path = filter_gff_file(gff_file, genes_ids, bp_upstream, bp_downstream, out_path)
+    if specific_genes == 1:
+        # parse gene IDs text file and save into a list of gene IDs
+        genes_ids = gene_ids_to_list(genes_ids_file)
+        # handling the GFF annotations file - filter only the annotations for genes and add columns of promoter site start and site end.
+        promoters_df, gff_with_proms_path = filter_gff_file(gff_file, genes_ids, bp_upstream, bp_downstream, out_path)
+    else:
+        promoters_df, gff_with_proms_path = full_genome_gff_filter(gff_file, bp_upstream, bp_downstream, out_path)
     # handling the genome FASTA file - extract promoter sites using bedtools getfasta
     sites = get_upstream_sites(out_path, fasta_file, promoters_df)
     # loop through the genes in the target sites list and create sgRNA candidates
@@ -299,10 +351,13 @@ def sgrnas_for_genes(out_path: str, in_path: str, genes_ids_file: str, fasta_fil
     # get off-targets for the sgRNA candidates
     if with_off_targets == 1:
         get_off_targets(candidates_list, in_path, out_path, gff_with_proms_path)
+    # sort and filter the candidates
+    sorted_candidates = sort_candidates(candidates_list, top_num)
     # results to DataFrame: add Rank column ranking the candidates of each gene, and save the results to CSV
-    df = results_to_dataframe(candidates_list, out_path, with_off_targets)
-    print(df)
-    return candidates_list
+    results_to_dataframe(sorted_candidates, out_path, with_off_targets)
+    t1 = time.perf_counter()
+    print(f"Activathor ran in approximately {t1 - t0} seconds")
+    return sorted_candidates
 
 
 def parse_arguments(parser_obj: argparse.ArgumentParser):
@@ -314,14 +369,14 @@ def parse_arguments(parser_obj: argparse.ArgumentParser):
     :return: parsed parameters for the algorithm run
     :rtype: argparse.Namespace
     """
-    parser_obj.add_argument('out_path', type=str, metavar='<out_path>',
+    parser_obj.add_argument('--out_path', '-out', type=str, metavar='<out_path>',
                             help='The output path to the directory in which the output files will be written')
-    parser_obj.add_argument('in_path', type=str, metavar='<out_path>',
+    parser_obj.add_argument('--in_path', '-in', type=str, metavar='<out_path>',
                             help='The directory path from which the input files will be found')
-    parser_obj.add_argument('genes', type=str, default='', help='')
-    parser_obj.add_argument('fasta_file', type=str, metavar='<fasta_file>', help='The path to the input FASTA file')
-    parser_obj.add_argument('gff_file', type=str, metavar='<gff_file>', help='The path to the input GFF file')
-    parser_obj.add_argument('--scoring_function', '-n', type=str, default='ucrispr',
+    parser_obj.add_argument('--genes', '-g', type=str, default='', help='')
+    parser_obj.add_argument('--fasta_file', '-fasta', type=str, metavar='<fasta_file>', help='The path to the input FASTA file')
+    parser_obj.add_argument('--gff_file', '-gff', type=str, metavar='<gff_file>', help='The path to the input GFF file')
+    parser_obj.add_argument('--scoring_function', '-sf', type=str, default='ucrispr',
                             help='the on scoring function of the targets. Optional scoring systems are: deephf, ucrispr. '
                                  'Additional scoring function may be added by the user or by request.')
     parser_obj.add_argument('--pams', type=List, default=['AGG', 'GGG', 'CGG', 'TGG'],
@@ -334,10 +389,12 @@ def parse_arguments(parser_obj: argparse.ArgumentParser):
                             help='percentage of minimum GC content by which to filter sgRNA candidates')
     parser_obj.add_argument('--max_gc_cont', '-x', type=int, default=60,
                             help='percentage of maximum GC content by which to filter sgRNA candidates')
-    parser_obj.add_argument('--with_off_targets', '-o', type=int, default=1,
+    parser_obj.add_argument('--with_off_targets', '-wot', type=int, default=1,
                             help='choose whether to search for off-targets in the algorithm run')
-    parser_obj.add_argument('--top_num', '-t', type=int, default=1,
+    parser_obj.add_argument('--top_num', '-tn', type=int, default=1,
                             help='number of top scored candidates per gene')
+    parser_obj.add_argument('--specific_genes', '-sg', type=int, default=1,
+                            help='choose whether to run on list of specific genes or whole genome')
     arguments = parser_obj.parse_args()
     return arguments
 
@@ -357,7 +414,8 @@ if __name__ == "__main__":
                      min_gc_cont=args.min_gc_cont,
                      max_gc_cont=args.max_gc_cont,
                      with_off_targets=args.with_off_targets,
-                     top_num=args.top_num
+                     top_num=args.top_num,
+                     specific_genes=args.specific_genes
                      )
 
 # crispritz chromosomes directory should contain only fasta format files

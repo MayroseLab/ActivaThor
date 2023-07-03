@@ -1,6 +1,7 @@
 """Module for finding off-targets"""
 import os
 import sys
+import time
 
 import pandas as pd
 from typing import Dict, List
@@ -112,7 +113,7 @@ def get_off_target(x, sequence_to_candidate_dict: Dict[str, ActivationCandidate]
     :param sequence_to_candidate_dict: a dictionary of sequence:candidate
     """
     candidate = sequence_to_candidate_dict[x['crRNA'][:20]]
-    off_target = OffTarget(x['DNA'].upper(), candidate.chromosome, int(x['Position']), x['Direction'], int(x['Mismatches']))
+    off_target = OffTarget(x['DNA'].upper(), x['Chromosome'].split(" ")[0], int(x['Position']), x['Direction'], int(x['Mismatches']))  # TODO fix chromosome names in files
     legit_letters = True
     for char in off_target.seq:
         if char not in {"A", "C", "T", "G"}:
@@ -135,12 +136,18 @@ def calculate_scores(candidates_list: List[ActivationCandidate]):
     for candidate in candidates_list:
         batch_candidates_list += [candidate.seq + candidate.pam for _ in range(len(candidate.off_targets_list))]
         batch_off_targets_list += [off_target.seq for off_target in candidate.off_targets_list]
-    scores = moff(batch_off_targets_list, batch_candidates_list)
-    for i in range(len(candidates_list)):
-        for j in range(len(candidates_list[i].off_targets_list)):
-            candidates_list[i].off_targets_list[j].score = round(scores[i+j], 4)
-        # sort the off-targets in the off_targets_list by score from highest to lowest
-        candidates_list[i].sort_off_targets()
+    t0 = time.perf_counter()
+    scores = moff(batch_candidates_list, batch_off_targets_list)
+    t1 = time.perf_counter()
+    print(f"scoring function for {len(batch_candidates_list)} off-targets ran in {t1 - t0} seconds")
+    i = 0
+    for candidate in candidates_list:
+        if len(candidate.off_targets_list) > 0:
+            for off in candidate.off_targets_list:
+                off.score = round(scores[i], 4)
+                i += 1
+            # sort the off-targets in the off_targets_list by score from highest to lowest
+            candidate.sort_off_targets()
 
 
 def get_off_targets(candidates_list: List[ActivationCandidate], in_path: str, out_path: str, gff_with_proms_path: str):
