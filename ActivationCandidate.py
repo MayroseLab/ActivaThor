@@ -5,16 +5,17 @@ from typing import Dict
 class ActivationCandidate:
     """A class representing a sgRNA candidate to target CRISPR activation sites in a gene promoter."""
 
-    def __init__(self, seq: str, pam: str, gene: str, chromosome: str, act_site_start: int, act_site_end: int, dist_from_TSS: int,
-                 strand: str, promoter_range_rank: int, gc_content: float, gc_content_category: int, nucleotide_repetitions: Dict, nuc_rep_score: int, on_score: float = 0):
+    def __init__(self, seq: str, pam: str, gene: str, gene_strand: str, chromosome: str, act_site_start: int, act_site_end: int, dist_from_TSS: int,
+                 pam_strand: str, promoter_range_rank: int, gc_content: float, gc_content_category: int, nucleotide_repetitions: Dict, nuc_rep_score: int, on_score: float = 0):
         self.seq = seq
         self.pam = pam
         self.gene = gene
+        self.gene_strand = gene_strand
         self.chromosome = chromosome
         self.act_site_start = act_site_start
         self.act_site_end = act_site_end
         self.dist_from_TSS = dist_from_TSS
-        self.strand = strand
+        self.pam_strand = pam_strand
         self.promoter_range_rank = promoter_range_rank
         self.gc_content = gc_content
         self.gc_content_category = gc_content_category
@@ -25,7 +26,7 @@ class ActivationCandidate:
         self.off_targets_list = []
 
     def __repr__(self):
-        return f"seq = {self.seq}, gene = {self.gene}, on-score = {self.on_score}"
+        return f"seq = {self.seq}, pam = {self.pam}, gene = {self.gene}, dist_from_TSS = {self.dist_from_TSS}"
 
     def calc_GC_content(self, min_gc_cont: int, max_gc_cont: int):
         """
@@ -50,9 +51,11 @@ class ActivationCandidate:
         """
         self.nucleotide_repetitions['5*A'] = self.seq.count('AAAAA')
         self.nucleotide_repetitions['5*C'] = self.seq.count('CCCCC')
-        self.nucleotide_repetitions['4*G'] = self.seq.count('GGGG')
+        self.nucleotide_repetitions['4*G'] = self.seq.count('GGGG')  # Most critical
         self.nucleotide_repetitions['4*T'] = self.seq.count('TTTT')
         self.nuc_rep_score = sum(self.nucleotide_repetitions.values())
+        # self.nuc_rep_score = self.seq.count('GGGG')  # count only 4*G repetitions
+        # print('nuc_rep_score CALCULATED BY "GGGG" COUNT ONLY!!')
 
     def to_dict(self):
         """Create a dictionary of the ActivationCandidate object"""

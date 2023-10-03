@@ -24,7 +24,7 @@ def give_complementary(seq: str) -> str:
     return ''.join(complementary_seq_list)
 
 
-def get_sites(upstream_site: str, pams: Tuple) -> Tuple[List[Tuple[str, int]], List[Tuple[str, int]], List[Tuple[str, int]], List[Tuple[str, int]]]:
+def get_targets(upstream_site: str, pams: Tuple) -> Tuple[List[Tuple[str, int]], List[Tuple[str, int]], List[Tuple[str, int]], List[Tuple[str, int]]]:
     """
     This function is used to find CRISPR target site sequences from an input DNA sequence. Using regex this
     function searches for all the patterns of 23 letters long strings with all the PAM sequences in 'pams' in their end,
@@ -40,14 +40,15 @@ def get_sites(upstream_site: str, pams: Tuple) -> Tuple[List[Tuple[str, int]], L
     found_fwd_targets_second = []
     found_rev_targets_first = []
     found_rev_targets_second = []
+    complementary_strand = give_complementary(upstream_site)
     # loop over different PAM's
     for i in range(len(pams)):
         target_and_pam = "." * target_len + pams[i]
         compiled = regex.compile(target_and_pam)
         found_sense_targets_first = regex.finditer(compiled, upstream_site[78:])  # 1-222 bps from TSS
         found_sense_targets_second = regex.finditer(compiled, upstream_site[:100])  # 201-300 bps from TSS
-        found_antisense_targets_first = regex.finditer(compiled, give_complementary(upstream_site[:222]))  # 1-222 bps from TSS
-        found_antisense_targets_second = regex.finditer(compiled, give_complementary(upstream_site[200:]))  # 201-300 bps from TSS
+        found_antisense_targets_first = regex.finditer(compiled, complementary_strand[:222])  # 1-222 bps from TSS
+        found_antisense_targets_second = regex.finditer(compiled, complementary_strand[200:])  # 201-300 bps from TSS
 
         found_fwd_targets_first += [(seq.group(0), 222-seq.start()) for seq in found_sense_targets_first if 'N' not in seq.group(0)]
         found_fwd_targets_second += [(seq.group(0), 300-seq.start()) for seq in found_sense_targets_second if 'N' not in seq.group(0)]

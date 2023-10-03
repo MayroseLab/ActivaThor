@@ -1,14 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
-  <component name="PublishConfigData" serverName="josefbrook@powerlogin.tau.ac.il:22" remoteFilesAllowedToDisappearOnAutoupload="false">
+  <component name="PublishConfigData" autoUpload="Always" serverName="josefbrook@powerlogin.tau.ac.il:22 password" remoteFilesAllowedToDisappearOnAutoupload="false">
     <serverData>
-      <paths name="josefbrook@powerlogin.tau.ac.il:22">
+      <paths name="josefbrook@powerlogin.tau.ac.il:22 password">
         <serverdata>
           <mappings>
-            <mapping deploy="/projects/Gene_Activation_Library/Librarian" local="$PROJECT_DIR$" web="/" />
+            <mapping deploy="/groups/itay_mayrose/josefbrook/projects/Gene_Activation_Library/Librarian" local="$PROJECT_DIR$" />
           </mappings>
         </serverdata>
       </paths>
     </serverData>
+    <option name="myAutoUpload" value="ALWAYS" />
   </component>
 </project>
