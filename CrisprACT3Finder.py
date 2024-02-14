@@ -59,11 +59,11 @@ def add_promoter_site_indices(genes_filt_df, upstream: int, downstream: int):
     """
     # create promoter site start indices
     genes_filt_df['site_start'] = genes_filt_df.apply(
-        lambda x: x['start'] - upstream - 1 if x['strand'] == '+' else x['end'] - downstream,
+        lambda x: x['new_start'] - upstream - 1 if x['strand'] == '+' else x['new_end'] - downstream,
         axis=1)
     # create promoter site end indices
     genes_filt_df['site_end'] = genes_filt_df.apply(
-        lambda x: x['start'] + downstream - 1 if x['strand'] == '+' else x['end'] + upstream,
+        lambda x: x['new_start'] + downstream - 1 if x['strand'] == '+' else x['new_end'] + upstream,
         axis=1)
 
 
@@ -112,30 +112,57 @@ def filter_gff_file(gff_file: str, genes_ids: List[str], upstream: int, downstre
     :param out_path:
     :return: gffpandas data frame
     """
-    # open annotations file with gff pandas
+    # Open GFF annotations file with gffpandas
     gff_annotations = gffpd.read_gff3(gff_file)
-    # filter relevant genes. Inform the user if an input gene ID was not found in the GFF file
-    filtered_annotations = gff_annotations.filter_feature_of_type(['gene'])
-    genes_filt_gff = filtered_annotations.get_feature_by_attribute('gene_id', genes_ids)
-    filt_annotations_attr = filtered_annotations.attributes_to_columns()
+    # Check and inform the user if an input gene ID was not found in the GFF file
+    all_genes_df = gff_annotations.df[gff_annotations.df['type'] == 'gene']
+    start_char = 'ID='
+    end_char = ';'
+    all_genes_df['start_position'] = all_genes_df['attributes'].str.find(start_char) + 3
+    all_genes_df['end_position'] = all_genes_df['attributes'].str.find(end_char)
+    all_genes_df['ID'] = all_genes_df.apply(
+        lambda row: row['attributes'][row['start_position']:row['end_position']], axis=1)
+    all_genes_df.drop(['start_position', 'end_position'], axis=1, inplace=True)
     for gene_id in genes_ids:
-        if gene_id not in list(filt_annotations_attr['gene_id']):
+        if gene_id not in list(all_genes_df['ID']):
             print(f"No matching gene ID={gene_id} was found in the GFF file")
-    # add promoter site start and site end indices to the data frame
-    genes_filt_df = genes_filt_gff.attributes_to_columns()
-    add_promoter_site_indices(genes_filt_df, upstream, downstream)
-    genes_filt_df['start'] = genes_filt_df.apply(lambda x: x['site_start'], axis=1)
-    genes_filt_df['end'] = genes_filt_df.apply(lambda x: x['site_end'], axis=1)
-    # change the type of the added sites to "promoter"
-    genes_filt_df.loc[genes_filt_df["type"] == "gene", "type"] = "promoter"
-    # append the promoter annotations to the GFF
-    new_anno_df = filt_annotations_attr.append(genes_filt_df, ignore_index=True)
-    new_anno_df['attributes'] = new_anno_df.apply(lambda x: x['gene_id'], axis=1)
-    new_anno_df = new_anno_df.drop(new_anno_df.iloc[:, 9:], axis=1)
-    gff_annotations.df = new_anno_df
-    gff_with_proms_path = "/gff_with_proms.gff3"
-    gff_annotations.to_gff3(out_path + gff_with_proms_path)
-    return genes_filt_df, gff_with_proms_path
+    # Filter the relevant genes (by user input gene ids) from the annotation. Add 'ID' column from attributes
+    relevant_genes_df = all_genes_df[all_genes_df['ID'].isin(genes_ids)]
+    # Filter mRNAs from the GFF and transform to DataFrame. Add 'Parent' column from attributes
+    all_mrnas_df = gff_annotations.df[gff_annotations.df['type'] == 'mRNA']
+    start_char = 'Parent='
+    end_char = ';N'
+    all_mrnas_df['start_position'] = all_mrnas_df['attributes'].str.find(start_char) + 7
+    all_mrnas_df['end_position'] = all_mrnas_df['attributes'].str.find(end_char)
+    all_mrnas_df['parent'] = all_mrnas_df.apply(
+        lambda row: row['attributes'][row['start_position']:row['end_position']], axis=1)
+    all_mrnas_df.drop(['start_position', 'end_position'], axis=1, inplace=True)
+    # Calculate new start and end indices for the genes as the average of the mRNAs indices
+    gene_start_dict = {}
+    gene_end_dict = {}
+    for gene in relevant_genes_df['ID']:
+        mrnas_of_gene = all_mrnas_df[(all_mrnas_df['parent']) == gene]
+        mean_of_mrna_start = round(mrnas_of_gene['start'].mean())
+        mean_of_mrna_end = round(mrnas_of_gene['end'].mean())
+        gene_start_dict[gene] = mean_of_mrna_start
+        gene_end_dict[gene] = mean_of_mrna_end
+    # Add the new start and end indices to the relevant genes DataFrame
+    relevant_genes_df['new_start'] = relevant_genes_df['ID'].map(gene_start_dict)
+    relevant_genes_df['new_end'] = relevant_genes_df['ID'].map(gene_end_dict)
+    # Add promoter site start and site end indices to the data frame
+    add_promoter_site_indices(relevant_genes_df, upstream, downstream)
+    relevant_genes_df['start'] = relevant_genes_df.apply(lambda x: x['site_start'], axis=1)
+    relevant_genes_df['end'] = relevant_genes_df.apply(lambda x: x['site_end'], axis=1)
+    # Change the type of the added sites to "promoter"
+    relevant_genes_df.loc[relevant_genes_df["type"] == "gene", "type"] = "promoter"
+    # Append the promoter annotations to the all genes annotations df
+    annotations_with_promoters_df = all_genes_df.append(relevant_genes_df, ignore_index=True)
+    annotations_with_promoters_df['attributes'] = annotations_with_promoters_df.apply(lambda x: x['ID'], axis=1)
+    annotations_with_promoters_df = annotations_with_promoters_df.iloc[:, :9]
+    gff_annotations.df = annotations_with_promoters_df
+    annotations_with_promoters_path = "/annotations_with_promoters.gff"
+    gff_annotations.to_gff3(out_path + annotations_with_promoters_path)
+    return relevant_genes_df, annotations_with_promoters_path
 
 
 def get_promoter_sites(out_path: str, fasta_file: str, filtered_gene_df) -> List[str]:
@@ -148,7 +175,7 @@ def get_promoter_sites(out_path: str, fasta_file: str, filtered_gene_df) -> List
     """
     # create BED format file
     filtered_gene_df.to_csv(out_path + '/genes.bed', sep='\t',
-                            columns=['seq_id', 'start', 'end', 'gene_id', 'score', 'strand'],
+                            columns=['seq_id', 'start', 'end', 'ID', 'score', 'strand'],
                             header=False, index=False)
     bed_file = out_path + "/genes.bed"
     # run bedtools
@@ -234,11 +261,11 @@ def return_candidates(out_path: str, promoter_sites_lst: List[str], genes_filt_d
     for i in range(0, len(promoter_sites_lst), 2):
         gene_candidates = []
         # create gene annotations
-        gene_id = promoter_sites_lst[i][1:-3]  # TODO find with regex or any other tool of validation
-        chromosome = genes_filt_df[genes_filt_df['gene_id'] == gene_id]['seq_id'].values[0]
-        act_site_start = int(genes_filt_df[genes_filt_df['gene_id'] == gene_id]['start'].values[0])
-        act_site_end = int(genes_filt_df[genes_filt_df['gene_id'] == gene_id]['end'].values[0])
-        gene_strand = genes_filt_df[genes_filt_df['gene_id'] == gene_id]['strand'].values[0]
+        gene_id = promoter_sites_lst[i][1:-3]
+        chromosome = genes_filt_df[genes_filt_df['ID'] == gene_id]['seq_id'].values[0]
+        act_site_start = int(genes_filt_df[genes_filt_df['ID'] == gene_id]['start'].values[0])
+        act_site_end = int(genes_filt_df[genes_filt_df['ID'] == gene_id]['end'].values[0])
+        gene_strand = genes_filt_df[genes_filt_df['ID'] == gene_id]['strand'].values[0]
         # extract target sequences from each TSS upstream site
         targets_fwd_1, targets_fwd_2, targets_rev_1, targets_rev_2 = get_targets_from_promoter_site(
             promoter_sites_lst[i + 1].upper(), pams)
@@ -259,18 +286,30 @@ def return_candidates(out_path: str, promoter_sites_lst: List[str], genes_filt_d
     print(f"scoring function for {len(candidates_list)} candidates ran in {t1 - t0} seconds")
     for i in range(len(candidates_list)):
         candidates_list[i].on_score = scores[i]
-    # sort candidates list for each gene ID by GC content, nucleotide repetitions and on-target score
+    # Group the objects by 'gene_id' and create a dictionary of gene ID -> gene's candidates list
     gene_id_attr_sort = sorted(candidates_list, key=attrgetter('gene'))
-    # Group the objects by 'gene_id'
-    grouped_candidates = {gene_id: list(objects) for gene_id, objects in
+    grouped_candidates_dict = {gene_id: list(objects) for gene_id, objects in
                           groupby(gene_id_attr_sort, key=attrgetter('gene'))}
-    # Create a dictionary with gene_id as key and value as a list of 'top_num'*2 ranked objects
-    candidates_list_sorted = []
+    # Remove candidates with almost (distance = 1) overlapping sequences
+    for gene in grouped_candidates_dict:
+        new_candidates_list = list(grouped_candidates_dict[gene])
+        for i in range(len(grouped_candidates_dict[gene])-1):
+            for j in range(i+1, len(grouped_candidates_dict[gene])):
+                if abs(grouped_candidates_dict[gene][i].dist_from_TSS - grouped_candidates_dict[gene][j].dist_from_TSS) == 1\
+                        and grouped_candidates_dict[gene][i].pam_strand == grouped_candidates_dict[gene][j].pam_strand:
+                    if grouped_candidates_dict[gene][i] < grouped_candidates_dict[gene][j]:
+                        if grouped_candidates_dict[gene][i] in new_candidates_list:
+                            new_candidates_list.remove(grouped_candidates_dict[gene][i])
+                    else:
+                        if grouped_candidates_dict[gene][j] in new_candidates_list:
+                            new_candidates_list.remove(grouped_candidates_dict[gene][j])
+        grouped_candidates_dict[gene] = new_candidates_list
     # Filter out candidates with nucleotide repetitions or with Bsa sequences in the sequence.
-    # Sort by gene ID and GC content and return only the 'top_num*2' number of best candidates
-    for gene_id, objects in grouped_candidates.items():
+    # Sort by gene ID and GC content and return only the 'top_num*2' number of best candidates.
+    candidates_list_sorted = []
+    for gene_id, gene_candidates in grouped_candidates_dict.items():
         candidates_list_sorted += sorted(filter(lambda cand: cand.nuc_rep_score == 0
-                                                and "GGTCTC" not in cand.seq and "GAGACC" not in cand.seq, objects),
+                                                and "GGTCTC" not in cand.seq and "GAGACC" not in cand.seq, gene_candidates),
                                          key=lambda c: (c.gene, c.gc_content_category))[:top_num * 2]
     return candidates_list_sorted
 
@@ -351,9 +390,9 @@ def sgrnas_for_genes(out_path: str, in_path: str, genes_ids_file: str, fasta_fil
         # parse gene IDs text file and save into a list of gene IDs
         genes_ids = gene_ids_to_list(genes_ids_file)
         # handling the GFF annotations file - filter only the annotations for genes and add columns of promoter site start and site end.
-        promoters_df, gff_with_proms_path = filter_gff_file(gff_file, genes_ids, bp_upstream, bp_downstream, out_path)
+        promoters_df, genes_with_proms_csv_path = filter_gff_file(gff_file, genes_ids, bp_upstream, bp_downstream, out_path)
     else:
-        promoters_df, gff_with_proms_path = full_genome_gff_filter(gff_file, bp_upstream, bp_downstream, out_path)
+        promoters_df, genes_with_proms_csv_path = full_genome_gff_filter(gff_file, bp_upstream, bp_downstream, out_path)
     # handling the genome FASTA file - extract promoter sites using bedtools getfasta
     sites = get_promoter_sites(out_path, fasta_file, promoters_df)
     # loop through the genes in the target sites list and create sgRNA candidates
@@ -361,7 +400,7 @@ def sgrnas_for_genes(out_path: str, in_path: str, genes_ids_file: str, fasta_fil
                                         top_num)
     # get off-targets for the sgRNA candidates
     if with_off_targets == 1:
-        get_off_targets(candidates_list, in_path, out_path, gff_with_proms_path)
+        get_off_targets(candidates_list, in_path, out_path, genes_with_proms_csv_path)
     # sort and filter the candidates
     sorted_candidates = sort_candidates(candidates_list, top_num)
     # results to DataFrame: add Rank column ranking the candidates of each gene, and save the results to CSV

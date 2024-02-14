@@ -28,6 +28,17 @@ class ActivationCandidate:
     def __repr__(self):
         return f"seq = {self.seq}, pam = {self.pam}, gene = {self.gene}, dist_from_TSS = {self.dist_from_TSS}"
 
+    def __lt__(self, other):
+        if self.gc_content_category > other.gc_content_category:
+            return True
+        elif self.gc_content_category == other.gc_content_category:
+            if self.on_score < other.on_score:
+                return True
+            else:
+                return False
+        else:
+            return False
+
     def calc_GC_content(self, min_gc_cont: int, max_gc_cont: int):
         """
         Calculate the percentage of G and C nucleotides in the sgRNA candidate sequence, and calculate the GC content

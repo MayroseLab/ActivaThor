@@ -150,7 +150,7 @@ def calculate_scores(candidates_list: List[ActivationCandidate]):
             candidate.sort_off_targets()
 
 
-def get_off_targets(candidates_list: List[ActivationCandidate], in_path: str, out_path: str, gff_with_proms_path: str):
+def get_off_targets(candidates_list: List[ActivationCandidate], in_path: str, out_path: str, genes_with_proms_csv_path: str):
     """
     Find the off-targets for each candidate using crispritz, store them in the candidate's off_targets_list attribute
     as a list of OffTarget objects. Then calculates the off-target scores for each off-target of each candidate and
@@ -159,7 +159,7 @@ def get_off_targets(candidates_list: List[ActivationCandidate], in_path: str, ou
     :param candidates_list: a list of sgRNA candidates
     :param in_path: path to directory in which the chromosome FASTA files are stored
     :param out_path: output path for the algorithm results
-    :param gff_with_proms_path:
+    :param genes_with_proms_csv_path:
     """
     # run crispritz
     off_targets_pd = run_crispritz(candidates_list, sys.exec_prefix + "/bin/crispritz.py", out_path,
@@ -169,7 +169,7 @@ def get_off_targets(candidates_list: List[ActivationCandidate], in_path: str, ou
     # add the found off-targets of each candidate to the candidate's off_targets_list
     add_crispritz_off_targets(off_targets_pd, sequence_to_candidate_dict)
     #
-    intersect_bed = run_bedtools(candidates_list, out_path+gff_with_proms_path)
+    intersect_bed = run_bedtools(candidates_list, out_path + genes_with_proms_csv_path)
     # add the genomic regions to the OffTargets attributes
     add_genomic_regions_to_off_targets(intersect_bed, sequence_to_candidate_dict)
     # remove on-targets
